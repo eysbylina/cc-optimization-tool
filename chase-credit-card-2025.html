@@ -1,0 +1,1075 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Credit Card Statement Analysis</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --border: #2d3a4d;
+      --text: #e7e9ea;
+      --muted: #8b98a5;
+      --accent: #1d9bf0;
+      --green: #00ba7c;
+      --red: #f4212e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 1.5rem;
+      min-height: 100vh;
+    }
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin: 0 0 1rem 0;
+      color: var(--text);
+    }
+    .upload-zone {
+      border: 2px dashed var(--border);
+      border-radius: 8px;
+      padding: 2rem;
+      text-align: center;
+      margin-bottom: 1.5rem;
+      background: var(--surface);
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+    .upload-zone:hover, .upload-zone.dragover { border-color: var(--accent); }
+    .upload-zone input { display: none; }
+    .upload-zone p { margin: 0; color: var(--muted); }
+    .upload-zone .hint { font-size: 0.85rem; margin-top: 0.5rem; }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .controls input, .controls select {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      font-size: 0.9rem;
+    }
+    .controls input::placeholder { color: var(--muted); }
+    .controls input[type="search"] { min-width: 200px; }
+    .summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      margin-bottom: 1rem;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+    .summary span strong { color: var(--text); }
+    .summary .positive { color: var(--green); }
+    .summary .negative { color: var(--red); }
+    .table-wrap {
+      overflow-x: auto;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    th {
+      text-align: left;
+      padding: 0.6rem 0.75rem;
+      background: var(--bg);
+      color: var(--muted);
+      font-weight: 600;
+      white-space: nowrap;
+      cursor: pointer;
+      user-select: none;
+      border-bottom: 1px solid var(--border);
+    }
+    th:hover { color: var(--accent); }
+    th.sorted-asc::after { content: ' ▲'; font-size: 0.7em; color: var(--accent); }
+    th.sorted-desc::after { content: ' ▼'; font-size: 0.7em; color: var(--accent); }
+    td {
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+    tr:hover td { background: rgba(29, 155, 240, 0.06); }
+    td.amount { text-align: right; font-variant-numeric: tabular-nums; }
+    td.amount.charge { color: var(--red); }
+    td.amount.credit { color: var(--green); }
+    td.card { font-weight: 600; color: var(--muted); }
+    .no-results { padding: 2rem; text-align: center; color: var(--muted); }
+    .hidden { display: none !important; }
+    .card-compare-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem;
+    }
+    .card-compare-section h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin: 0 0 0.75rem 0;
+      color: var(--text);
+    }
+    .rent-input {
+      margin-bottom: 1rem;
+    }
+    .rent-input label {
+      display: block;
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 0.25rem;
+    }
+    .rent-input input {
+      width: 120px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.4rem 0.6rem;
+      border-radius: 6px;
+    }
+    .bilt-cash-row {
+      margin-bottom: 1rem;
+      font-size: 0.85rem;
+    }
+    .bilt-cash-check {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .bilt-cash-check input { width: auto; }
+    .bilt-cash-value {
+      margin-top: 0.35rem;
+      color: var(--accent);
+    }
+    .exec-summary-wrap {
+      margin-bottom: 1.25rem;
+      padding: 1rem;
+      background: var(--bg);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .exec-summary-title { font-size: 1rem; margin: 0 0 0.25rem 0; color: var(--text); }
+    .exec-summary-note { font-size: 0.8rem; color: var(--muted); margin: 0 0 0.75rem 0; }
+    .exec-summary-table { font-size: 0.9rem; }
+    .exec-summary-table th, .exec-summary-table td { padding: 0.4rem 0.75rem; text-align: left; }
+    .exec-summary-table th:nth-child(n+2), .exec-summary-table td:nth-child(n+2) { text-align: right; }
+    .exec-summary-table thead th { border-bottom: 1px solid var(--border); color: var(--muted); }
+    .points-results {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .points-card {
+      background: var(--bg);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      border: 1px solid var(--border);
+    }
+    .points-card .name { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.25rem; }
+    .points-card .pts { color: var(--accent); font-size: 1.1rem; }
+    .points-card .af { font-size: 0.8rem; color: var(--muted); }
+    .points-card .net { font-size: 0.85rem; margin-top: 0.25rem; }
+    .points-card.best { border-color: var(--green); box-shadow: 0 0 0 1px var(--green); }
+    .recommendation {
+      padding: 0.75rem 1rem;
+      background: rgba(0, 186, 124, 0.1);
+      border-radius: 6px;
+      border: 1px solid var(--green);
+      font-size: 0.9rem;
+      color: var(--text);
+    }
+    .recommendation strong { color: var(--green); }
+    .compare-two-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      align-items: flex-end;
+      margin-bottom: 1rem;
+    }
+    .compare-two-row label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.25rem; }
+    .compare-two-row select { min-width: 160px; }
+    .pie-charts-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    @media (max-width: 640px) { .pie-charts-row { grid-template-columns: 1fr; } }
+    .pie-box {
+      background: var(--bg);
+      border-radius: 8px;
+      padding: 1rem;
+      border: 1px solid var(--border);
+    }
+    .pie-box h3 {
+      font-size: 0.9rem;
+      margin: 0 0 0.5rem 0;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .pie-box select {
+      margin-bottom: 0.75rem;
+      font-size: 0.85rem;
+    }
+    .pie-svg-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 220px;
+    }
+    .pie-svg-wrap svg { max-width: 100%; height: auto; }
+    .pie-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem 1rem;
+      margin-top: 0.75rem;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+    .pie-legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+    .pie-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+    .points-by-category-table { margin-top: 1rem; }
+    .points-by-category-table table { font-size: 0.8rem; }
+    .points-by-category-table th:nth-child(n+2), .points-by-category-table td:nth-child(n+2) { text-align: right; }
+    .points-by-category-table .total-row { font-weight: 600; background: var(--bg); }
+    .benefits-toggle {
+      color: var(--accent);
+      cursor: pointer;
+      text-decoration: underline;
+      font-size: 0.85rem;
+    }
+    .benefits-detail-row td {
+      padding: 0.25rem 0.75rem 0.5rem 0.75rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+    }
+    .benefits-detail-row ul {
+      margin: 0.15rem 0 0 1.25rem;
+      padding: 0;
+    }
+    .benefits-detail-row li {
+      margin-bottom: 0.15rem;
+    }
+    .bilt-cash-detail-row td {
+      font-size: 0.8rem;
+      color: var(--muted);
+      padding: 0.2rem 0.75rem;
+    }
+    .bilt-shortfall { color: var(--red); font-weight: 600; }
+    .bilt-surplus { color: var(--green); }
+  </style>
+</head>
+<body>
+  <h1>Credit Card Points Analyzer</h1>
+  <div class="upload-zone" id="uploadZone">
+    <input type="file" id="fileInput" accept=".csv,.pdf" multiple />
+    <p style="font-size:1.1rem;font-weight:600;margin-bottom:0.5rem;">Drop your historical credit card annual statements here</p>
+    <p style="color:var(--muted);max-width:520px;margin:0 auto 0.75rem;">This tool analyzes your actual spending history and projects how many points you would earn if that same spend were on a different credit card — helping you find the best card for your lifestyle.</p>
+    <p class="hint">Accepted formats: CSV or PDF. You can upload one or multiple statements.</p>
+    <div style="margin-top:1.25rem;padding:0.75rem 1rem;background:rgba(0,186,124,0.08);border:1px solid var(--green);border-radius:6px;max-width:520px;margin-left:auto;margin-right:auto;text-align:left;">
+      <p style="margin:0 0 0.35rem;font-size:0.85rem;font-weight:600;color:var(--green);">&#128274; Your data stays 100% private</p>
+      <ul style="margin:0;padding:0 0 0 1.25rem;font-size:0.8rem;color:var(--muted);line-height:1.5;">
+        <li>Everything runs locally in your browser — no data is ever uploaded to a server</li>
+        <li>Your statements are processed in memory only — nothing is saved to disk, cookies, or local storage</li>
+        <li>All data is automatically erased when you close or refresh this page</li>
+        <li>You can verify this: the page works fully offline after loading</li>
+      </ul>
+    </div>
+  </div>
+
+  <div id="tableSection" class="hidden">
+    <div class="card-compare-section">
+      <h2>Card Comparison</h2>
+      <div class="rent-input">
+        <label for="rentInput">Monthly rent or mortgage ($)</label>
+        <input type="number" id="rentInput" min="0" step="100" placeholder="e.g. 2500" title="Used for Bilt rent points (1x, capped at 100k pts/yr)" />
+      </div>
+      <div class="bilt-cash-row">
+        <label class="bilt-cash-check">
+          <input type="checkbox" id="biltCashForRentPoints" />
+          Convert Bilt Cash to points on rent/mortgage ($30 Bilt Cash per $1,000 rent = 1 pt per $1 rent)
+        </label>
+        <div class="bilt-cash-value" id="biltCashValue"></div>
+      </div>
+      <div class="compare-two-row">
+        <div>
+          <label for="compareCardA">Current Card</label>
+          <select id="compareCardA">
+            <option value="csr">Chase Sapphire Reserve</option>
+            <option value="bilt">Bilt Palladium</option>
+            <option value="csp">Chase Sapphire Preferred</option>
+            <option value="amex">AMEX Platinum</option>
+            <option value="amexGold">AMEX Gold</option>
+            <option value="venturex">Capital One Venture X</option>
+          </select>
+        </div>
+        <div>
+          <label for="compareCardB">Compare Card 1</label>
+          <select id="compareCardB">
+            <option value="bilt">Bilt Palladium</option>
+            <option value="csr">Chase Sapphire Reserve</option>
+            <option value="csp">Chase Sapphire Preferred</option>
+            <option value="amex">AMEX Platinum</option>
+            <option value="amexGold">AMEX Gold</option>
+            <option value="venturex">Capital One Venture X</option>
+          </select>
+        </div>
+        <div>
+          <label for="compareCardC">Compare Card 2</label>
+          <select id="compareCardC">
+            <option value="amex">AMEX Platinum</option>
+            <option value="bilt">Bilt Palladium</option>
+            <option value="csr">Chase Sapphire Reserve</option>
+            <option value="csp">Chase Sapphire Preferred</option>
+            <option value="amexGold">AMEX Gold</option>
+            <option value="venturex">Capital One Venture X</option>
+          </select>
+        </div>
+      </div>
+      <div class="exec-summary-wrap" id="execSummaryWrap">
+        <h3 class="exec-summary-title">Executive Summary</h3>
+        <p class="exec-summary-note">Selected cards above. No points value assumed.</p>
+        <div class="table-wrap">
+          <table class="exec-summary-table">
+            <thead><tr id="execSummaryHead"><th>Metric</th><th id="execColA">—</th><th id="execColB">—</th><th id="execColC">—</th></tr></thead>
+            <tbody id="execSummaryBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="pie-charts-row">
+        <div class="pie-box">
+          <h3>Spend by category</h3>
+          <select id="pieCard1">
+            <option value="">All cards</option>
+          </select>
+          <div class="pie-svg-wrap" id="pieWrap1"></div>
+          <div class="pie-legend" id="pieLegend1"></div>
+        </div>
+        <div class="pie-box">
+          <h3>Spend by category</h3>
+          <select id="pieCard2">
+            <option value="">All cards</option>
+          </select>
+          <div class="pie-svg-wrap" id="pieWrap2"></div>
+          <div class="pie-legend" id="pieLegend2"></div>
+        </div>
+      </div>
+      <div class="points-by-category-table">
+        <h3 style="font-size:0.9rem;margin:0 0 0.5rem 0;color:var(--muted);">Points by category <span id="pointsTableFilter" style="font-weight:400;font-size:0.8rem;color:var(--accent);"></span></h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr id="pointsTableHead"><th>Category</th><th>Spend</th><th id="colA">—</th><th id="colB">—</th><th id="colC">—</th></tr></thead>
+            <tbody id="pointsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="controls">
+      <input type="search" id="search" placeholder="Search description, category..." />
+      <select id="filterCard">
+        <option value="">All cards</option>
+      </select>
+      <select id="filterCategory">
+        <option value="">All categories</option>
+      </select>
+      <select id="filterType">
+        <option value="">All types</option>
+      </select>
+    </div>
+    <div class="summary" id="summary"></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-col="transactionDate">Date</th>
+            <th data-col="card">Card</th>
+            <th data-col="description">Description</th>
+            <th data-col="category">Category</th>
+            <th data-col="type">Type</th>
+            <th data-col="amount">Amount</th>
+            <th id="txnPtsColA" data-col="ptsA">Pts (Current)</th>
+            <th id="txnPtsColB" data-col="ptsB">Pts (Compare 1)</th>
+            <th id="txnPtsColC" data-col="ptsC">Pts (Compare 2)</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div class="no-results" id="noResults" style="display:none;">No transactions match your filters.</div>
+    </div>
+  </div>
+
+  <script>
+    let DATA = [];
+    const uploadZone = document.getElementById('uploadZone');
+    const fileInput = document.getElementById('fileInput');
+    const tableSection = document.getElementById('tableSection');
+    const searchEl = document.getElementById('search');
+    const filterCard = document.getElementById('filterCard');
+    const filterCategory = document.getElementById('filterCategory');
+    const filterType = document.getElementById('filterType');
+    const tbody = document.getElementById('tbody');
+    const summaryEl = document.getElementById('summary');
+    const noResults = document.getElementById('noResults');
+    const rentInput = document.getElementById('rentInput');
+    const biltCashForRentPointsEl = document.getElementById('biltCashForRentPoints');
+    const biltCashValueEl = document.getElementById('biltCashValue');
+    const execSummaryWrap = document.getElementById('execSummaryWrap');
+    const execColA = document.getElementById('execColA');
+    const execColB = document.getElementById('execColB');
+    const execColC = document.getElementById('execColC');
+    const execSummaryBody = document.getElementById('execSummaryBody');
+    const compareCardA = document.getElementById('compareCardA');
+    const compareCardB = document.getElementById('compareCardB');
+    const compareCardC = document.getElementById('compareCardC');
+    const pieCard1 = document.getElementById('pieCard1');
+    const pieCard2 = document.getElementById('pieCard2');
+    const pieWrap1 = document.getElementById('pieWrap1');
+    const pieWrap2 = document.getElementById('pieWrap2');
+    const pieLegend1 = document.getElementById('pieLegend1');
+    const pieLegend2 = document.getElementById('pieLegend2');
+    const pointsTableHead = document.getElementById('pointsTableHead');
+    const pointsTableBody = document.getElementById('pointsTableBody');
+    const colA = document.getElementById('colA');
+    const colB = document.getElementById('colB');
+    const colC = document.getElementById('colC');
+    const txnPtsColA = document.getElementById('txnPtsColA');
+    const txnPtsColB = document.getElementById('txnPtsColB');
+    const txnPtsColC = document.getElementById('txnPtsColC');
+    const pointsTableFilterEl = document.getElementById('pointsTableFilter');
+
+    const BILT_CASH_PCT = 0.04;
+    const BILT_CASH_RENT_RATE = 0.03;
+
+    const AIRLINE_RE = /\b(DELTA\b|UNITED\b|AMERICAN AIR|SOUTHWEST|JETBLUE|JET BLUE|ALASKA AIR|SPIRIT AIR|FRONTIER AIR|HAWAIIAN AIR|ALLEGIANT|SUN COUNTRY)/i;
+    const HOTEL_RE = /\b(MARRIOTT|HILTON|HYATT|IHG\b|HOLIDAY INN|RESIDENCE INN|COURTYARD|WESTIN\b|SHERATON|HAMPTON INN|DOUBLETREE|EMBASSY SUITE|FAIRFIELD|SPRINGHILL|W HOTEL|RITZ.CARLTON|FOUR SEASONS|ST\.?\s*REGIS|BEST WESTERN|WYNDHAM|RADISSON|OMNI\b|INTERCONTINENTAL|CROWNE PLAZA|KIMPTON|ALOFT|CANOPY|CURIO|TAPESTRY|TRIBUTE|LE MERIDIEN|ELEMENT\b|AC HOTEL|MOXY\b|PROTEA)/i;
+    const AIRBNB_RE = /\bAIRBNB\b/i;
+    const FOOD_DELIVERY_RE = /UBER\s*\*\s*EATS|DOORDASH|DD \*DOORDASH|GRUBHUB|POSTMATES|CAVIAR/i;
+    const RIDESHARE_RE = /\bLYFT\b|\bUBER\b/i;
+    const STREAMING_RE = /NETFLIX|HULU|DISNEY\+|SPOTIFY|APPLE\.COM\/BILL|YOUTUBE|HBO|PARAMOUNT|PEACOCK|ESPN|SLING/i;
+    const ONLINE_GROCERY_RE = /INSTACART|AMAZON FRESH|AMAZONFRESH|WHOLE FOODS ONLINE|SHIPT|WALMART\.COM|WALMART GROCERY|FRESHDIRECT|THRIVE MARKET|HUNGRYROOT|MISFITS MARKET|IMPERFECT FOODS/i;
+
+    function classifyTxn(desc, category) {
+      const d = (desc || '');
+      const c = (category || '').toLowerCase();
+      const isFoodCat = /food|dining|drink/i.test(c);
+      const isGroceryCat = /grocery|groceries/i.test(c);
+      if (AIRLINE_RE.test(d)) return 'airline';
+      if (HOTEL_RE.test(d) && !AIRBNB_RE.test(d) && !isFoodCat && !isGroceryCat) return 'hotel_direct';
+      if (AIRBNB_RE.test(d)) return 'airbnb';
+      if (FOOD_DELIVERY_RE.test(d)) return 'dining';
+      if (RIDESHARE_RE.test(d) && !FOOD_DELIVERY_RE.test(d)) return 'rideshare';
+      if (STREAMING_RE.test(d)) return 'streaming';
+      if (isGroceryCat && ONLINE_GROCERY_RE.test(d)) return 'groceries_online';
+      if (isFoodCat) return 'dining';
+      if (isGroceryCat) return 'groceries';
+      if (/travel|gas/i.test(c)) return 'travel_other';
+      return 'other';
+    }
+
+    function getTxnMultiplier(cardKey, txn) {
+      const cls = classifyTxn(txn.description, txn.category);
+      switch (cardKey) {
+        case 'bilt': return 2;
+        case 'csr':
+          if (cls === 'airline' || cls === 'hotel_direct') return 4;
+          if (cls === 'dining') return 3;
+          return 1;
+        case 'amex':
+          if (cls === 'airline') return 5;
+          return 1;
+        case 'amexGold':
+          if (cls === 'dining') return 4;
+          if (cls === 'groceries' || cls === 'groceries_online') return 4;
+          if (cls === 'airline') return 3;
+          return 1;
+        case 'venturex': return 2;
+        case 'csp':
+          if (cls === 'dining' || cls === 'streaming') return 3;
+          if (cls === 'groceries_online') return 3;
+          if (cls === 'groceries') return 1;
+          if (cls === 'airline' || cls === 'hotel_direct' || cls === 'airbnb' || cls === 'rideshare' || cls === 'travel_other') return 2;
+          return 1;
+        default: return 1;
+      }
+    }
+
+    function calcCardPoints(cardKey, txns) {
+      let pts = 0;
+      txns.forEach(txn => { if (txn.amount < 0) pts += Math.abs(txn.amount) * getTxnMultiplier(cardKey, txn); });
+      return Math.round(pts);
+    }
+
+    const CARDS = {
+      bilt: {
+        name: 'Bilt Palladium',
+        af: 495,
+        credits: 400,
+        creditDetails: [
+          '$400 hotel credit (semiannual, $200 each half)',
+        ],
+      },
+      csr: {
+        name: 'Chase Sapphire Reserve',
+        af: 795,
+        credits: 1999,
+        creditDetails: [
+          '$300 annual travel credit',
+          '$500 The Edit hotel credit ($250 semiannual)',
+          '$300 DoorDash credits',
+          '$300 StubHub credits',
+          '$120 Lyft credit',
+          '$120 DashPass membership',
+          '$359 WHOOP membership',
+        ],
+      },
+      amex: {
+        name: 'AMEX Platinum',
+        af: 895,
+        credits: 2114,
+        creditDetails: [
+          '$300 Lululemon credit ($75/quarter)',
+          '$400 Resy dining credit ($100/quarter)',
+          '$200 Uber Cash ($15/mo + $20 Dec bonus)',
+          '$120 Uber One membership',
+          '$240 Digital Entertainment ($20/mo)',
+          '$155 Walmart+ ($12.95/mo)',
+          '$100 Saks Fifth Avenue ($50/half)',
+          '$200 Airline Fee credit',
+          '$200 Hotel credit (FHR / Hotel Collection)',
+          '$199 CLEAR Plus credit',
+        ],
+      },
+      amexGold: {
+        name: 'AMEX Gold',
+        af: 325,
+        credits: 240,
+        creditDetails: [
+          '$120 Uber Cash ($10/mo)',
+          '$120 dining credit ($10/mo)',
+        ],
+      },
+      venturex: {
+        name: 'Capital One Venture X',
+        af: 395,
+        credits: 400,
+        creditDetails: [
+          '$300 annual travel credit (Capital One Travel)',
+          '$100 anniversary miles bonus (~10,000 miles)',
+        ],
+      },
+      csp: {
+        name: 'Chase Sapphire Preferred',
+        af: 95,
+        credits: 50,
+        creditDetails: [
+          '$50 annual hotel credit (Chase Travel)',
+        ],
+      },
+    };
+
+    function getSpendByCategory(rows) {
+      const byCat = {};
+      rows.forEach(r => {
+        if (r.amount >= 0) return;
+        const cat = r.category || 'Uncategorized';
+        byCat[cat] = (byCat[cat] || 0) + Math.abs(r.amount);
+      });
+      return byCat;
+    }
+
+    function getPointsByCategoryForCard(cardKey, txns) {
+      const result = {};
+      txns.forEach(txn => {
+        if (txn.amount >= 0) return;
+        const cat = txn.category || 'Uncategorized';
+        const pts = Math.abs(txn.amount) * getTxnMultiplier(cardKey, txn);
+        result[cat] = (result[cat] || 0) + pts;
+      });
+      return result;
+    }
+
+    const PIE_COLORS = ['#1d9bf0','#00ba7c','#f4212e','#ffad1f','#7856ff','#7fba00','#f45d48','#2d3a4d'];
+    function drawPieChart(wrapEl, legendEl, byCategory) {
+      if (!wrapEl || !legendEl) return;
+      const entries = Object.entries(byCategory).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+      const total = entries.reduce((s, [, v]) => s + v, 0);
+      if (total === 0) {
+        wrapEl.innerHTML = '<p style="color:var(--muted);font-size:0.9rem;">No spend data</p>';
+        legendEl.innerHTML = '';
+        return;
+      }
+      const size = 200;
+      const cx = size / 2;
+      const cy = size / 2;
+      const r = size / 2 - 4;
+      let startDeg = -90;
+      let svg = '<svg viewBox="0 0 ' + size + ' ' + size + '" width="' + size + '" height="' + size + '">';
+      entries.forEach(([, val], i) => {
+        const angle = (val / total) * 360;
+        const endDeg = startDeg + angle;
+        const x1 = cx + r * Math.cos(startDeg * Math.PI / 180);
+        const y1 = cy + r * Math.sin(startDeg * Math.PI / 180);
+        const x2 = cx + r * Math.cos(endDeg * Math.PI / 180);
+        const y2 = cy + r * Math.sin(endDeg * Math.PI / 180);
+        const large = angle > 180 ? 1 : 0;
+        const d = 'M' + cx + ',' + cy + ' L' + x1 + ',' + y1 + ' A' + r + ',' + r + ' 0 ' + large + ',1 ' + x2 + ',' + y2 + ' Z';
+        svg += '<path d="' + d + '" fill="' + PIE_COLORS[i % PIE_COLORS.length] + '" stroke="var(--surface)" stroke-width="1"/>';
+        startDeg = endDeg;
+      });
+      svg += '</svg>';
+      wrapEl.innerHTML = svg;
+      legendEl.innerHTML = entries.map(([cat, val], i) =>
+        '<span><i style="background:' + PIE_COLORS[i % PIE_COLORS.length] + '"></i>' +
+        escapeHtml(cat) + ' $' + val.toFixed(0) + '</span>'
+      ).join('');
+    }
+
+    function updatePieCharts() {
+      if (DATA.length === 0) return;
+      const cardKeys = [...new Set(DATA.map(r => r.card))].sort();
+      const filter1 = (pieCard1 && pieCard1.value) ? (r => r.card === pieCard1.value) : () => true;
+      const filter2 = (pieCard2 && pieCard2.value) ? (r => r.card === pieCard2.value) : () => true;
+      const rows1 = DATA.filter(r => r.amount < 0).filter(filter1);
+      const rows2 = DATA.filter(r => r.amount < 0).filter(filter2);
+      drawPieChart(pieWrap1, pieLegend1, getSpendByCategory(rows1));
+      drawPieChart(pieWrap2, pieLegend2, getSpendByCategory(rows2));
+    }
+
+    function updatePointsTable() {
+      if (DATA.length === 0 || !pointsTableBody) return;
+      const pieFilter = (pieCard1 && pieCard1.value) ? pieCard1.value : '';
+      if (pointsTableFilterEl) pointsTableFilterEl.textContent = pieFilter ? '— filtered to Card ****' + pieFilter : '';
+      const txns = DATA.filter(r => r.amount < 0 && (!pieFilter || r.card === pieFilter));
+      const spendByCat = getSpendByCategory(txns);
+      const keys = [
+        (compareCardA && compareCardA.value) || 'csr',
+        (compareCardB && compareCardB.value) || 'bilt',
+        (compareCardC && compareCardC.value) || 'amex',
+      ];
+      const colEls = [colA, colB, colC];
+      const ptsByCat = keys.map(k => getPointsByCategoryForCard(k, txns));
+      colEls.forEach((el, i) => { if (el) el.textContent = CARDS[keys[i]] ? CARDS[keys[i]].name : '—'; });
+      const cats = Object.keys(spendByCat).sort();
+      const totals = [0, 0, 0];
+      let totalSpend = 0;
+      const rent = parseFloat(rentInput?.value) || 0;
+      let body = '';
+      cats.forEach(cat => {
+        const spend = spendByCat[cat];
+        totalSpend += spend;
+        const pts = keys.map((k, i) => Math.round(ptsByCat[i][cat] || 0));
+        pts.forEach((p, i) => { totals[i] += p; });
+        body += '<tr><td>' + escapeHtml(cat) + '</td><td>$' + spend.toFixed(2) + '</td>' + pts.map(p => '<td>' + p.toLocaleString() + '</td>').join('') + '</tr>';
+      });
+      const biltCashForRent = biltCashForRentPointsEl ? biltCashForRentPointsEl.checked : false;
+      const hasBilt = keys.includes('bilt');
+      if (hasBilt) {
+        const bc = getBiltCashBreakdown(totalSpend, rent, biltCashForRent);
+        const biltVal = biltCashForRent && rent > 0 ? bc.rentPtsCaptured.toLocaleString() + ' pts' : '—';
+        const biltCost = biltCashForRent && rent > 0 ? '$' + bc.biltCashSpent.toFixed(2) + ' Bilt Cash' : '—';
+        body += '<tr><td>Rent points (via Bilt Cash)</td><td>' + biltCost + '</td>' + keys.map((k, i) => {
+          if (k === 'bilt') { totals[i] += bc.rentPtsCaptured; return '<td>' + biltVal + '</td>'; }
+          return '<td>—</td>';
+        }).join('') + '</tr>';
+      }
+      body += '<tr class="total-row"><td>Total</td><td>$' + totalSpend.toFixed(2) + '</td>' + totals.map(t => '<td>' + t.toLocaleString() + '</td>').join('') + '</tr>';
+      pointsTableBody.innerHTML = body;
+    }
+
+    function getBiltCashBreakdown(totalSpend, rentMonthly, toggleOn) {
+      const biltCashEarned = totalSpend * BILT_CASH_PCT;
+      const rentAnnual = rentMonthly * 12;
+      const biltCashNeeded = rentAnnual * BILT_CASH_RENT_RATE;
+      const biltCashSpent = toggleOn && rentMonthly > 0 ? Math.min(biltCashEarned, biltCashNeeded) : 0;
+      const rentPtsCaptured = Math.round(biltCashSpent / BILT_CASH_RENT_RATE);
+      const biltCashRemainder = biltCashEarned - biltCashSpent;
+      const shortfall = toggleOn && rentMonthly > 0 ? Math.max(0, biltCashNeeded - biltCashEarned) : 0;
+      const monthlySpendNeeded = (rentMonthly * BILT_CASH_RENT_RATE) / BILT_CASH_PCT;
+      return { biltCashEarned, biltCashNeeded, biltCashSpent, rentPtsCaptured, biltCashRemainder, shortfall, monthlySpendNeeded, rentAnnual };
+    }
+
+    function updateExecutiveSummary() {
+      if (!execSummaryBody) return;
+      const keys = [
+        (compareCardA && compareCardA.value) || 'csr',
+        (compareCardB && compareCardB.value) || 'bilt',
+        (compareCardC && compareCardC.value) || 'amex',
+      ];
+      const cols = [execColA, execColB, execColC];
+      const txns = DATA.filter(r => r.amount < 0);
+      const totalSpend = txns.reduce((s, r) => s + Math.abs(r.amount), 0);
+      const rent = parseFloat(rentInput?.value) || 0;
+      const biltCashToggle = biltCashForRentPointsEl ? biltCashForRentPointsEl.checked : false;
+
+      const infos = keys.map(key => {
+        const card = CARDS[key];
+        if (!card) return { key, name: '—', pts: 0, af: 0, credits: 0, creditDetails: [] };
+        let pts = calcCardPoints(key, txns);
+        if (key === 'bilt' && biltCashToggle && rent > 0) {
+          pts += getBiltCashBreakdown(totalSpend, rent, true).rentPtsCaptured;
+        }
+        return { key, name: card.name, pts, af: card.af, credits: card.credits || 0, creditDetails: card.creditDetails || [] };
+      });
+
+      cols.forEach((el, i) => { if (el) el.textContent = infos[i].name; });
+
+      let body = '';
+      body += '<tr><td>Total Points</td>' + infos.map(c => '<td>' + Math.round(c.pts).toLocaleString() + '</td>').join('') + '</tr>';
+      body += '<tr><td>Annual Fee</td>' + infos.map(c => '<td>$' + c.af + '</td>').join('') + '</tr>';
+      body += '<tr><td>Points / Annual Fee</td>' + infos.map(c => '<td>' + (c.af > 0 ? (c.pts / c.af).toFixed(1) : '—') + '</td>').join('') + '</tr>';
+
+      body += '<tr><td><span class="benefits-toggle" onclick="toggleBenefitsDetail()">Additional benefits value ▸</span></td>' + infos.map(c => '<td>$' + c.credits + '</td>').join('') + '</tr>';
+      const makeList = (items) => items.length ? '<ul>' + items.map(i => '<li>' + escapeHtml(i) + '</li>').join('') + '</ul>' : '—';
+      body += '<tr class="benefits-detail-row" id="benefitsDetailRow" style="display:none;"><td></td>' + infos.map(c => '<td>' + makeList(c.creditDetails) + '</td>').join('') + '</tr>';
+
+      const hasBilt = infos.some(c => c.key === 'bilt');
+      if (hasBilt) {
+        const bc = getBiltCashBreakdown(totalSpend, rent, biltCashToggle);
+        const valOrDash = (key, val) => key === 'bilt' ? '$' + val.toFixed(2) : '—';
+        body += '<tr><td>Total Bilt Cash earned (4% of spend)</td>' + infos.map(c => '<td>' + valOrDash(c.key, bc.biltCashEarned) + '</td>').join('') + '</tr>';
+        body += '<tr><td>Bilt Cash needed for full rent redemption</td>' + infos.map(c => '<td>' + valOrDash(c.key, bc.biltCashNeeded) + '</td>').join('') + '</tr>';
+        body += '<tr><td>Bilt Cash spent for rent points</td>' + infos.map(c => '<td>' + valOrDash(c.key, bc.biltCashSpent) + '</td>').join('') + '</tr>';
+        body += '<tr><td>Rent points captured</td>' + infos.map(c => '<td>' + (c.key === 'bilt' ? bc.rentPtsCaptured.toLocaleString() : '—') + '</td>').join('') + '</tr>';
+        body += '<tr><td>Remainder Bilt Cash</td>' + infos.map(c => '<td>' + valOrDash(c.key, bc.biltCashRemainder) + '</td>').join('') + '</tr>';
+        if (bc.shortfall > 0) {
+          const shortfallNote = 'Shortfall: $' + bc.shortfall.toFixed(2) + ' Bilt Cash. Need $' + bc.monthlySpendNeeded.toFixed(0) + '/mo card spend to cover full rent.';
+          body += '<tr class="bilt-cash-detail-row"><td colspan="4"><span class="bilt-shortfall">' + shortfallNote + '</span></td></tr>';
+        }
+      }
+      execSummaryBody.innerHTML = body;
+      const row = document.getElementById('benefitsDetailRow');
+      if (row && benefitsVisible) row.style.display = '';
+      const toggle = document.querySelector('.benefits-toggle');
+      if (toggle) toggle.textContent = benefitsVisible ? 'Additional benefits value ▾' : 'Additional benefits value ▸';
+    }
+
+    let benefitsVisible = false;
+    function toggleBenefitsDetail() {
+      benefitsVisible = !benefitsVisible;
+      const row = document.getElementById('benefitsDetailRow');
+      const toggle = document.querySelector('.benefits-toggle');
+      if (row) row.style.display = benefitsVisible ? '' : 'none';
+      if (toggle) toggle.textContent = benefitsVisible ? 'Additional benefits value ▾' : 'Additional benefits value ▸';
+    }
+
+    function updateCardComparison() {
+      if (DATA.length === 0) return;
+      const rows = DATA.filter(r => r.amount < 0);
+      const totalSpend = rows.reduce((s, r) => s + Math.abs(r.amount), 0);
+      const biltCashForRentPoints = biltCashForRentPointsEl ? biltCashForRentPointsEl.checked : false;
+      const rent = parseFloat(rentInput?.value) || 0;
+      if (biltCashValueEl) {
+        const bc = getBiltCashBreakdown(totalSpend, rent, biltCashForRentPoints);
+        let txt = 'Bilt Cash earned: $' + bc.biltCashEarned.toFixed(2) + '/yr (4% of $' + totalSpend.toFixed(0) + ' spend)';
+        if (biltCashForRentPoints && rent > 0) {
+          txt += ' → ' + bc.rentPtsCaptured.toLocaleString() + ' rent pts (costs $' + bc.biltCashSpent.toFixed(2) + ' Bilt Cash)';
+          if (bc.shortfall > 0) txt += ' | Shortfall: $' + bc.shortfall.toFixed(2);
+          if (bc.biltCashRemainder > 0) txt += ' | Remainder: $' + bc.biltCashRemainder.toFixed(2);
+        }
+        biltCashValueEl.textContent = txt;
+      }
+      updateExecutiveSummary();
+      updatePieCharts();
+      updatePointsTable();
+    }
+
+    function parseCSV(text) {
+      const lines = text.trim().split(/\r?\n/);
+      if (lines.length < 2) return [];
+      const rows = [];
+      for (let i = 1; i < lines.length; i++) {
+        const parts = lines[i].split(',').map(s => s.trim());
+        if (parts.length >= 6) {
+          rows.push({
+            transactionDate: parts[0] || '',
+            postDate: parts[1] || '',
+            description: parts[2] || '',
+            category: parts[3] || '',
+            type: parts[4] || '',
+            amount: parseFloat(parts[5]) || 0,
+            memo: parts[6] || '',
+          });
+        }
+      }
+      return rows;
+    }
+
+    function getCardFromFilename(name) {
+      if (/0517/.test(name)) return '0517';
+      if (/5132/.test(name)) return '5132';
+      return name.replace(/[^0-9]/g, '').slice(-4) || 'card';
+    }
+
+    async function extractPdfText(file) {
+      const arrayBuf = await file.arrayBuffer();
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuf }).promise;
+      let fullText = '';
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        fullText += content.items.map(item => item.str).join(' ') + '\n';
+      }
+      return fullText;
+    }
+
+    const PDF_TXN_RE = /(\d{2}\/\d{2})\s+(\d{2}\/\d{2})\s+(.+?)\s+(-?\$?[\d,]+\.\d{2})\s*$/;
+    function parsePdfText(text) {
+      const rows = [];
+      const lines = text.split(/\n/);
+      for (const line of lines) {
+        const m = line.match(PDF_TXN_RE);
+        if (m) {
+          const txnDate = m[1];
+          const postDate = m[2];
+          const desc = m[3].trim();
+          const amtStr = m[4].replace(/[$,]/g, '');
+          const amount = parseFloat(amtStr) || 0;
+          rows.push({
+            transactionDate: txnDate,
+            postDate: postDate,
+            description: desc,
+            category: '',
+            type: amount > 0 ? 'Payment' : 'Sale',
+            amount: amount > 0 ? amount : -Math.abs(amount),
+            memo: '',
+          });
+        }
+      }
+      return rows;
+    }
+
+    async function loadFiles(files) {
+      if (!files || files.length === 0) return;
+      let all = [];
+      for (const f of files) {
+        const card = getCardFromFilename(f.name);
+        if (f.name.toLowerCase().endsWith('.pdf')) {
+          try {
+            const pdfText = await extractPdfText(f);
+            const rows = parsePdfText(pdfText).map(r => ({ ...r, card }));
+            all = all.concat(rows);
+          } catch (e) {
+            console.error('PDF parse error:', e);
+            alert('Could not parse PDF: ' + f.name + '. Try exporting as CSV from your bank instead.');
+          }
+        } else {
+          const text = await f.text();
+          const rows = parseCSV(text).map(r => ({ ...r, card }));
+          all = all.concat(rows);
+        }
+      }
+      all.sort((a, b) => new Date(b.transactionDate) - new Date(a.transactionDate));
+      DATA = all;
+      initTable();
+    }
+
+    function initTable() {
+      tableSection.classList.remove('hidden');
+      uploadZone.classList.add('hidden');
+      filterCard.innerHTML = '<option value="">All cards</option>';
+      [...new Set(DATA.map(r => r.card))].sort().forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c;
+        opt.textContent = 'Card ****' + c;
+        filterCard.appendChild(opt);
+      });
+      filterCategory.innerHTML = '<option value="">All categories</option>';
+      [...new Set(DATA.map(r => r.category))].filter(Boolean).sort().forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c;
+        opt.textContent = c;
+        filterCategory.appendChild(opt);
+      });
+      filterType.innerHTML = '<option value="">All types</option>';
+      [...new Set(DATA.map(r => r.type))].filter(Boolean).sort().forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t;
+        opt.textContent = t;
+        filterType.appendChild(opt);
+      });
+      let sortCol = 'transactionDate';
+      let sortDir = -1;
+      document.querySelectorAll('th[data-col]').forEach(th => th.classList.remove('sorted-asc', 'sorted-desc'));
+      document.querySelector('th[data-col="transactionDate"]').classList.add('sorted-desc');
+      bindSortAndFilter();
+      if (pieCard1 && pieCard2) {
+        pieCard1.innerHTML = '<option value="">All cards</option>';
+        pieCard2.innerHTML = '<option value="">All cards</option>';
+        [...new Set(DATA.map(r => r.card))].sort().forEach(c => {
+          const opt1 = document.createElement('option');
+          opt1.value = c;
+          opt1.textContent = 'Card ****' + c;
+          pieCard1.appendChild(opt1);
+          const opt2 = document.createElement('option');
+          opt2.value = c;
+          opt2.textContent = 'Card ****' + c;
+          pieCard2.appendChild(opt2);
+        });
+      }
+      if (compareCardA) compareCardA.onchange = render;
+      if (compareCardB) compareCardB.onchange = render;
+      if (compareCardC) compareCardC.onchange = render;
+      if (pieCard1) pieCard1.onchange = () => { updatePieCharts(); updatePointsTable(); };
+      if (pieCard2) pieCard2.onchange = updatePieCharts;
+      updateCardComparison();
+      render();
+    }
+
+    let sortCol = 'transactionDate';
+    let sortDir = -1;
+
+    function bindSortAndFilter() {
+      document.querySelectorAll('th[data-col]').forEach(th => {
+        th.onclick = () => {
+          if (sortCol === th.dataset.col) sortDir *= -1;
+          else { sortCol = th.dataset.col; sortDir = 1; }
+          document.querySelectorAll('th').forEach(h => h.classList.remove('sorted-asc', 'sorted-desc'));
+          th.classList.add(sortDir === 1 ? 'sorted-asc' : 'sorted-desc');
+          render();
+        };
+      });
+      searchEl.oninput = searchEl.onchange = render;
+      filterCard.onchange = filterCategory.onchange = filterType.onchange = render;
+      if (rentInput) rentInput.oninput = rentInput.onchange = updateCardComparison;
+      if (biltCashForRentPointsEl) biltCashForRentPointsEl.onchange = updateCardComparison;
+    }
+
+    function filterAndSort() {
+      const q = (searchEl.value || '').toLowerCase();
+      const card = filterCard.value;
+      const cat = filterCategory.value;
+      const type = filterType.value;
+      let rows = DATA.filter(r => {
+        if (card && r.card !== card) return false;
+        if (cat && r.category !== cat) return false;
+        if (type && r.type !== type) return false;
+        if (q) {
+          const text = [r.description, r.category, r.type].join(' ').toLowerCase();
+          if (!text.includes(q)) return false;
+        }
+        return true;
+      });
+      const curCardA = (compareCardA && compareCardA.value) || 'csr';
+      const curCardB = (compareCardB && compareCardB.value) || 'bilt';
+      const curCardC = (compareCardC && compareCardC.value) || 'amex';
+      rows = [...rows].sort((a, b) => {
+        let va, vb;
+        if (sortCol === 'ptsA') {
+          va = a.amount < 0 ? Math.abs(a.amount) * getTxnMultiplier(curCardA, a) : 0;
+          vb = b.amount < 0 ? Math.abs(b.amount) * getTxnMultiplier(curCardA, b) : 0;
+        } else if (sortCol === 'ptsB') {
+          va = a.amount < 0 ? Math.abs(a.amount) * getTxnMultiplier(curCardB, a) : 0;
+          vb = b.amount < 0 ? Math.abs(b.amount) * getTxnMultiplier(curCardB, b) : 0;
+        } else if (sortCol === 'ptsC') {
+          va = a.amount < 0 ? Math.abs(a.amount) * getTxnMultiplier(curCardC, a) : 0;
+          vb = b.amount < 0 ? Math.abs(b.amount) * getTxnMultiplier(curCardC, b) : 0;
+        } else if (sortCol === 'amount') {
+          va = Number(a[sortCol]);
+          vb = Number(b[sortCol]);
+        } else if (sortCol === 'transactionDate' || sortCol === 'postDate') {
+          va = new Date(a[sortCol]).getTime();
+          vb = new Date(b[sortCol]).getTime();
+        } else {
+          va = String(a[sortCol]);
+          vb = String(b[sortCol]);
+        }
+        if (va < vb) return -1 * sortDir;
+        if (va > vb) return 1 * sortDir;
+        return 0;
+      });
+      return rows;
+    }
+
+    function escapeHtml(s) {
+      if (s == null) return '';
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+
+    function render() {
+      const rows = filterAndSort();
+      const charges = rows.filter(r => r.amount < 0);
+      const credits = rows.filter(r => r.amount > 0);
+      const sumCharges = charges.reduce((s, r) => s + r.amount, 0);
+      const sumCredits = credits.reduce((s, r) => s + r.amount, 0);
+      const net = sumCharges + sumCredits;
+      const cardA = (compareCardA && compareCardA.value) || 'csr';
+      const cardB = (compareCardB && compareCardB.value) || 'bilt';
+      const cardC = (compareCardC && compareCardC.value) || 'amex';
+      if (txnPtsColA) txnPtsColA.textContent = 'Pts (' + (CARDS[cardA] ? CARDS[cardA].name : 'A') + ')';
+      if (txnPtsColB) txnPtsColB.textContent = 'Pts (' + (CARDS[cardB] ? CARDS[cardB].name : 'B') + ')';
+      if (txnPtsColC) txnPtsColC.textContent = 'Pts (' + (CARDS[cardC] ? CARDS[cardC].name : 'C') + ')';
+
+      summaryEl.innerHTML = [
+        '<span>Showing <strong>' + rows.length + '</strong> of ' + DATA.length + ' transactions</span>',
+        '<span class="negative">Charges: <strong>$' + Math.abs(sumCharges).toFixed(2) + '</strong></span>',
+        '<span class="positive">Credits: <strong>$' + sumCredits.toFixed(2) + '</strong></span>',
+        '<span>Net: <strong class="' + (net >= 0 ? 'positive' : 'negative') + '">$' + net.toFixed(2) + '</strong></span>',
+      ].join('');
+
+      tbody.innerHTML = '';
+      rows.forEach(r => {
+        const tr = document.createElement('tr');
+        const amountClass = r.amount >= 0 ? 'credit' : 'charge';
+        const amountStr = (r.amount >= 0 ? '+' : '') + '$' + Math.abs(r.amount).toFixed(2);
+        let ptsAStr = '—', ptsBStr = '—', ptsCStr = '—';
+        if (r.amount < 0) {
+          const amt = Math.abs(r.amount);
+          ptsAStr = Math.round(amt * getTxnMultiplier(cardA, r)).toLocaleString();
+          ptsBStr = Math.round(amt * getTxnMultiplier(cardB, r)).toLocaleString();
+          ptsCStr = Math.round(amt * getTxnMultiplier(cardC, r)).toLocaleString();
+        }
+        tr.innerHTML =
+          '<td>' + escapeHtml(r.transactionDate) + '</td>' +
+          '<td class="card">****' + escapeHtml(r.card) + '</td>' +
+          '<td>' + escapeHtml(r.description) + '</td>' +
+          '<td>' + escapeHtml(r.category) + '</td>' +
+          '<td>' + escapeHtml(r.type) + '</td>' +
+          '<td class="amount ' + amountClass + '">' + amountStr + '</td>' +
+          '<td class="amount">' + ptsAStr + '</td>' +
+          '<td class="amount">' + ptsBStr + '</td>' +
+          '<td class="amount">' + ptsCStr + '</td>';
+        tbody.appendChild(tr);
+      });
+
+      noResults.style.display = rows.length ? 'none' : 'block';
+      updateCardComparison();
+    }
+
+    uploadZone.addEventListener('click', () => fileInput.click());
+    uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+    uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+    uploadZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadZone.classList.remove('dragover');
+      loadFiles(e.dataTransfer.files);
+    });
+    fileInput.addEventListener('change', (e) => loadFiles(e.target.files));
+
+    window.addEventListener('beforeunload', () => {
+      DATA.length = 0;
+      if (tbody) tbody.innerHTML = '';
+      if (execSummaryBody) execSummaryBody.innerHTML = '';
+      if (pointsTableBody) pointsTableBody.innerHTML = '';
+    });
+  </script>
+</body>
+</html>
