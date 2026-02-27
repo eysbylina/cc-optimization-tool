@@ -347,9 +347,13 @@ export async function extractPdfText(file: File): Promise<string> {
 
 /* ── PDF transaction patterns (multiple bank formats) ────────────────── */
 
-// Chase: MM/DD  MM/DD  description  amount
+// Chase year-end: MM/DD  MM/DD  description  amount (two dates)
 const CHASE_PDF_RE =
   /^(\d{2}\/\d{2})\s+(\d{2}\/\d{2})\s+(.+?)\s+(-?\$?[\d,]+\.\d{2})$/;
+
+// Chase monthly: MM/DD  description  amount (single date, no year)
+const CHASE_MONTHLY_PDF_RE =
+  /^(\d{2}\/\d{2})\s+(.+?)\s+(-?\$?[\d,]+\.\d{2})$/;
 
 // AMEX year-end: MM/DD/YYYY  MonthName  description  $amount
 const MONTHS_RE =
@@ -416,7 +420,7 @@ export function parsePdfText(text: string): Transaction[] {
       continue;
     }
 
-    // Try Chase format
+    // Try Chase year-end format (two dates: trans date + post date)
     let m = line.match(CHASE_PDF_RE);
     if (m) {
       const amtStr = m[4].replace(/[$,]/g, "");
@@ -431,6 +435,29 @@ export function parsePdfText(text: string): Transaction[] {
           autoCategory: !!currentCategory,
           type: isCredit ? "Payment/Credit" : "Sale",
           amount: isCredit ? raw : -Math.abs(raw),
+          card: "",
+          memo: "",
+        })
+      );
+      continue;
+    }
+
+    // Try Chase monthly format (single date MM/DD, no year)
+    // Sign convention: positive = purchase (charge), negative = payment/credit
+    m = line.match(CHASE_MONTHLY_PDF_RE);
+    if (m) {
+      const amtStr = m[3].replace(/[$,]/g, "");
+      const raw = parseFloat(amtStr) || 0;
+      const isCredit = raw < 0;
+      rows.push(
+        assignCategory({
+          transactionDate: m[1],
+          postDate: "",
+          description: m[2].trim(),
+          category: currentCategory,
+          autoCategory: !!currentCategory,
+          type: isCredit ? "Payment/Credit" : "Sale",
+          amount: -raw,
           card: "",
           memo: "",
         })
