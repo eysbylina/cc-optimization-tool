@@ -26,7 +26,6 @@ function splitCSVRecords(text: string): string[][] {
             i++;
           }
         } else {
-          // Inside quotes: newlines are part of the field value — replace with space
           if (ch === "\n" || ch === "\r") {
             cur += " ";
             i++;
@@ -44,7 +43,6 @@ function splitCSVRecords(text: string): string[][] {
         cur = "";
         i++;
       } else if (ch === "\n" || ch === "\r") {
-        // End of record
         fields.push(cur.trim());
         i++;
         if (ch === "\r" && i < len && text[i] === "\n") i++;
@@ -55,7 +53,6 @@ function splitCSVRecords(text: string): string[][] {
       }
     }
 
-    // End of text without trailing newline
     if (i >= len && (cur || fields.length > 0)) {
       fields.push(cur.trim());
     }
@@ -66,6 +63,23 @@ function splitCSVRecords(text: string): string[][] {
   }
 
   return records;
+}
+
+/* ── Find the real header row (skip metadata lines) ──────────────────── */
+
+const HEADER_WORDS =
+  /^(date|trans|post|description|desc|payee|merchant|name|amount|amt|debit|credit|charge|payment|category|type|memo|card|status|ref)/i;
+
+function isHeaderRow(record: string[]): boolean {
+  const matches = record.filter((f) => HEADER_WORDS.test(f.trim()));
+  return matches.length >= 2;
+}
+
+function findHeaderIndex(records: string[][]): number {
+  for (let i = 0; i < Math.min(records.length, 10); i++) {
+    if (isHeaderRow(records[i])) return i;
+  }
+  return 0;
 }
 
 /* ── Auto-detect column positions ────────────────────────────────────── */
@@ -80,6 +94,7 @@ interface ColumnMapping {
   category: number;
   type: number;
   memo: number;
+  card: number;
 }
 
 function norm(h: string): string {
@@ -111,6 +126,7 @@ function detectColumns(headers: string[]): ColumnMapping {
   const categoryCol = findCol(n, "category", "merchantcategory");
   const typeCol = findCol(n, "type", "transactiontype");
   const memoCol = findCol(n, "memo", "extendeddetails");
+  const cardCol = findCol(n, "card", "cardno", "cardnumber", "accountnumber");
 
   return {
     date: dateCol,
@@ -122,6 +138,7 @@ function detectColumns(headers: string[]): ColumnMapping {
     category: categoryCol,
     type: typeCol,
     memo: memoCol,
+    card: cardCol,
   };
 }
 
@@ -147,13 +164,21 @@ function assignCategory(txn: Transaction): Transaction {
   return txn;
 }
 
+/* ── Extract card id from a "Card" column value like "Card-0634" ─────── */
+
+function parseCardColumn(raw: string): string {
+  const digits = raw.replace(/[^0-9]/g, "");
+  return digits.slice(-4) || "";
+}
+
 /* ── Generic CSV parser ──────────────────────────────────────────────── */
 
 export function parseCSV(text: string): Transaction[] {
   const allRecords = splitCSVRecords(text.trim());
   if (allRecords.length < 2) return [];
 
-  const headerFields = allRecords[0];
+  const headerIdx = findHeaderIndex(allRecords);
+  const headerFields = allRecords[headerIdx];
   const cols = detectColumns(headerFields);
 
   const hasDate = cols.date !== -1;
@@ -166,7 +191,7 @@ export function parseCSV(text: string): Transaction[] {
   }
 
   const rows: Transaction[] = [];
-  for (let i = 1; i < allRecords.length; i++) {
+  for (let i = headerIdx + 1; i < allRecords.length; i++) {
     const parts = allRecords[i];
     if (parts.length < 2) continue;
 
@@ -176,11 +201,21 @@ export function parseCSV(text: string): Transaction[] {
     } else {
       const debit = parseAmount(parts[cols.debit]);
       const credit = parseAmount(parts[cols.credit]);
-      amount = credit > 0 ? credit : -Math.abs(debit);
+      // Debit column = charge → make negative; Credit column = refund → make positive.
+      // Use Math.abs because some banks (Citi) put negative values in the credit column.
+      if (debit) {
+        amount = -Math.abs(debit);
+      } else if (credit) {
+        amount = Math.abs(credit);
+      } else {
+        amount = 0;
+      }
     }
 
     const desc = parts[cols.description] || "";
     const category = cols.category !== -1 ? parts[cols.category] || "" : "";
+    const cardFromCol =
+      cols.card !== -1 ? parseCardColumn(parts[cols.card] || "") : "";
 
     const txn: Transaction = {
       transactionDate: parts[cols.date] || "",
@@ -190,7 +225,7 @@ export function parseCSV(text: string): Transaction[] {
       autoCategory: false,
       type: cols.type !== -1 ? parts[cols.type] || "" : "",
       amount,
-      card: "",
+      card: cardFromCol,
       memo: cols.memo !== -1 ? parts[cols.memo] || "" : "",
     };
 
@@ -198,16 +233,19 @@ export function parseCSV(text: string): Transaction[] {
   }
 
   // Detect inverted sign convention (Discover, AMEX: positive = charge).
-  // Count all non-zero rows — if most are positive, flip every sign.
-  const nonZero = rows.filter((r) => r.amount !== 0);
-  const positiveCount = nonZero.filter((r) => r.amount > 0).length;
-  if (nonZero.length > 0 && positiveCount > nonZero.length * 0.6) {
-    for (const r of rows) {
-      r.amount = -r.amount;
+  // Only applies when using a single "amount" column — skip for debit/credit format
+  // since we already normalized signs above.
+  if (hasAmount) {
+    const nonZero = rows.filter((r) => r.amount !== 0);
+    const positiveCount = nonZero.filter((r) => r.amount > 0).length;
+    if (nonZero.length > 0 && positiveCount > nonZero.length * 0.6) {
+      for (const r of rows) {
+        r.amount = -r.amount;
+      }
     }
   }
 
-  // Assign type based on final (possibly flipped) amount
+  // Assign type based on final amount
   for (const r of rows) {
     if (!r.type) {
       r.type = r.amount >= 0 ? "Payment/Credit" : "Sale";

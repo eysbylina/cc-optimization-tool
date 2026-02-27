@@ -67,12 +67,18 @@ export default function Home() {
                         if (f.name.toLowerCase().endsWith(".pdf")) {
                           const text = await extractPdfText(f);
                           all = all.concat(
-                            parsePdfText(text).map((r) => ({ ...r, card }))
+                            parsePdfText(text).map((r) => ({
+                              ...r,
+                              card: r.card || card,
+                            }))
                           );
                         } else {
                           const text = await f.text();
                           all = all.concat(
-                            parseCSV(text).map((r) => ({ ...r, card }))
+                            parseCSV(text).map((r) => ({
+                              ...r,
+                              card: r.card || card,
+                            }))
                           );
                         }
                       }

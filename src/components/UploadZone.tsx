@@ -35,12 +35,15 @@ export default function UploadZone({ onFilesLoaded }: Props) {
             const pdfText = await extractPdfText(f);
             const rows = parsePdfText(pdfText).map((r) => ({
               ...r,
-              card,
+              card: r.card || card,
             }));
             all = all.concat(rows);
           } else {
             const text = await f.text();
-            const rows = parseCSV(text).map((r) => ({ ...r, card }));
+            const rows = parseCSV(text).map((r) => ({
+              ...r,
+              card: r.card || card,
+            }));
             all = all.concat(rows);
           }
         }
