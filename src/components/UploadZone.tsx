@@ -7,10 +7,17 @@ import {
   extractPdfText,
   parsePdfText,
   getCardFromFilename,
+  detectCardProduct,
+  DetectedCard,
 } from "@/lib/parsers";
 
+export interface UploadResult {
+  transactions: Transaction[];
+  detectedCards: DetectedCard[];
+}
+
 interface Props {
-  onFilesLoaded: (txns: Transaction[]) => void;
+  onFilesLoaded: (result: UploadResult) => void;
 }
 
 export default function UploadZone({ onFilesLoaded }: Props) {
@@ -27,12 +34,15 @@ export default function UploadZone({ onFilesLoaded }: Props) {
 
       try {
         let all: Transaction[] = [];
+        const detectedCards: DetectedCard[] = [];
 
         for (const f of Array.from(files)) {
           const card = getCardFromFilename(f.name);
 
           if (f.name.toLowerCase().endsWith(".pdf")) {
             const pdfText = await extractPdfText(f);
+            const detected = detectCardProduct(pdfText, f.name);
+            detectedCards.push(detected);
             const rows = parsePdfText(pdfText).map((r) => ({
               ...r,
               card: r.card || card,
@@ -40,6 +50,8 @@ export default function UploadZone({ onFilesLoaded }: Props) {
             all = all.concat(rows);
           } else {
             const text = await f.text();
+            const detected = detectCardProduct(text, f.name);
+            detectedCards.push(detected);
             const rows = parseCSV(text).map((r) => ({
               ...r,
               card: r.card || card,
@@ -62,7 +74,7 @@ export default function UploadZone({ onFilesLoaded }: Props) {
             new Date(a.transactionDate).getTime()
         );
 
-        onFilesLoaded(all);
+        onFilesLoaded({ transactions: all, detectedCards });
       } catch (e) {
         setError(
           `Error parsing file: ${e instanceof Error ? e.message : "Unknown error"}. Try exporting as CSV from your bank.`

@@ -26,6 +26,7 @@ export type CardKey =
   | "bilt"
   | "csr"
   | "csp"
+  | "cfu"
   | "amex"
   | "amexGold"
   | "venturex"
@@ -43,6 +44,7 @@ export const CARD_KEYS: CardKey[] = [
   "csr",
   "bilt",
   "csp",
+  "cfu",
   "amex",
   "amexGold",
   "venturex",

@@ -2,7 +2,8 @@
 
 import { useState, useCallback, useMemo } from "react";
 import { Transaction, CardKey } from "@/lib/types";
-import UploadZone from "@/components/UploadZone";
+import { CARDS } from "@/lib/cards";
+import UploadZone, { UploadResult } from "@/components/UploadZone";
 import CardComparison from "@/components/CardComparison";
 import TransactionTable from "@/components/TransactionTable";
 import AICategorize from "@/components/AICategorize";
@@ -15,33 +16,94 @@ export default function Home() {
   >(["csr", "bilt", "amex"]);
   const [monthlyRent, setMonthlyRent] = useState(0);
   const [biltCashEnabled, setBiltCashEnabled] = useState(false);
-  const [monthlyBiltEcosystemSpend, setMonthlyBiltEcosystemSpend] = useState(0);
+  const [monthlyBiltEcosystemSpend, setMonthlyBiltEcosystemSpend] =
+    useState(0);
+  const [cardDetectionMsg, setCardDetectionMsg] = useState<string | null>(null);
 
-  const handleFilesLoaded = useCallback((txns: Transaction[]) => {
-    setTransactions((prev) => {
-      const all = [...prev, ...txns];
-      all.sort(
-        (a, b) =>
-          new Date(b.transactionDate).getTime() -
-          new Date(a.transactionDate).getTime()
-      );
-      return all;
-    });
-  }, []);
+  const handleFilesLoaded = useCallback(
+    (result: UploadResult) => {
+      setTransactions((prev) => {
+        const all = [...prev, ...result.transactions];
+        all.sort(
+          (a, b) =>
+            new Date(b.transactionDate).getTime() -
+            new Date(a.transactionDate).getTime()
+        );
+        return all;
+      });
+
+      // Auto-detect card product and set Current Card
+      const detected = result.detectedCards.find((d) => d.cardKey !== null);
+      if (detected?.cardKey) {
+        setSelectedCards((prev) => [detected.cardKey!, prev[1], prev[2]]);
+        setCardDetectionMsg(
+          `Detected "${CARDS[detected.cardKey].name}" from your statement — set as Current Card.`
+        );
+      } else if (result.detectedCards.length > 0) {
+        setCardDetectionMsg(
+          "Could not identify the card product from your statement. Please select your current card manually."
+        );
+      }
+    },
+    []
+  );
+
+  const handleAddMoreFiles = useCallback(
+    async (fileList: FileList) => {
+      const {
+        parseCSV,
+        extractPdfText,
+        parsePdfText,
+        getCardFromFilename,
+        detectCardProduct,
+      } = await import("@/lib/parsers");
+      let all: Transaction[] = [];
+      const detectedCards: { cardKey: CardKey | null; productName: string | null }[] = [];
+
+      for (const f of Array.from(fileList)) {
+        const card = getCardFromFilename(f.name);
+        if (f.name.toLowerCase().endsWith(".pdf")) {
+          const text = await extractPdfText(f);
+          detectedCards.push(detectCardProduct(text, f.name));
+          all = all.concat(
+            parsePdfText(text).map((r) => ({ ...r, card: r.card || card }))
+          );
+        } else {
+          const text = await f.text();
+          detectedCards.push(detectCardProduct(text, f.name));
+          all = all.concat(
+            parseCSV(text).map((r) => ({ ...r, card: r.card || card }))
+          );
+        }
+      }
+
+      handleFilesLoaded({ transactions: all, detectedCards });
+    },
+    [handleFilesLoaded]
+  );
 
   const handleReset = useCallback(() => {
     setTransactions([]);
+    setCardDetectionMsg(null);
   }, []);
 
   const hasData = transactions.length > 0;
 
   const categoryStats = useMemo(() => {
-    if (!hasData) return { total: 0, fromStatement: 0, autoAssigned: 0, uncategorized: 0 };
+    if (!hasData)
+      return { total: 0, fromStatement: 0, autoAssigned: 0, uncategorized: 0 };
     const charges = transactions.filter((t) => t.amount < 0);
-    const fromStatement = charges.filter((t) => t.category && !t.autoCategory).length;
+    const fromStatement = charges.filter(
+      (t) => t.category && !t.autoCategory
+    ).length;
     const autoAssigned = charges.filter((t) => t.autoCategory).length;
     const uncategorized = charges.filter((t) => !t.category).length;
-    return { total: charges.length, fromStatement, autoAssigned, uncategorized };
+    return {
+      total: charges.length,
+      fromStatement,
+      autoAssigned,
+      uncategorized,
+    };
   }, [transactions, hasData]);
 
   return (
@@ -58,35 +120,7 @@ export default function Home() {
                 multiple
                 className="hidden"
                 onChange={(e) => {
-                  if (e.target.files) {
-                    const processFiles = async () => {
-                      const { parseCSV, extractPdfText, parsePdfText, getCardFromFilename } =
-                        await import("@/lib/parsers");
-                      let all: Transaction[] = [];
-                      for (const f of Array.from(e.target.files!)) {
-                        const card = getCardFromFilename(f.name);
-                        if (f.name.toLowerCase().endsWith(".pdf")) {
-                          const text = await extractPdfText(f);
-                          all = all.concat(
-                            parsePdfText(text).map((r) => ({
-                              ...r,
-                              card: r.card || card,
-                            }))
-                          );
-                        } else {
-                          const text = await f.text();
-                          all = all.concat(
-                            parseCSV(text).map((r) => ({
-                              ...r,
-                              card: r.card || card,
-                            }))
-                          );
-                        }
-                      }
-                      handleFilesLoaded(all);
-                    };
-                    processFiles();
-                  }
+                  if (e.target.files) handleAddMoreFiles(e.target.files);
                 }}
               />
             </label>
@@ -104,6 +138,25 @@ export default function Home() {
 
       {hasData && (
         <>
+          {/* Card detection message */}
+          {cardDetectionMsg && (
+            <div
+              className={`mb-4 px-4 py-2.5 rounded-md border text-sm flex items-center justify-between ${
+                cardDetectionMsg.includes("Detected")
+                  ? "border-positive/40 bg-positive/5 text-positive"
+                  : "border-yellow-500/40 bg-yellow-500/5 text-yellow-400"
+              }`}
+            >
+              <span>{cardDetectionMsg}</span>
+              <button
+                onClick={() => setCardDetectionMsg(null)}
+                className="ml-3 text-xs opacity-60 hover:opacity-100"
+              >
+                dismiss
+              </button>
+            </div>
+          )}
+
           <CategoryBanner stats={categoryStats} />
 
           <AICategorize

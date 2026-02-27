@@ -27,6 +27,17 @@ export const CARDS: Record<CardKey, CardDefinition> = {
     credits: 50,
     creditDetails: ["$50 annual hotel credit (Chase Travel)"],
   },
+  cfu: {
+    name: "Chase Freedom Unlimited",
+    af: 0,
+    credits: 0,
+    creditDetails: [
+      "No annual fee",
+      "5% on Chase Travel",
+      "3% on dining & drugstores",
+      "1.5% on everything else",
+    ],
+  },
   amex: {
     name: "AMEX Platinum",
     af: 895,

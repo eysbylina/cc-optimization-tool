@@ -1,4 +1,4 @@
-import { Transaction } from "./types";
+import { Transaction, CardKey } from "./types";
 import { lookupMerchantCategory } from "./merchantLookup";
 
 /* ── Full-text CSV record splitter (handles multi-line quoted fields) ── */
@@ -520,4 +520,38 @@ export function parsePdfText(text: string): Transaction[] {
 export function getCardFromFilename(name: string): string {
   const digits = name.replace(/[^0-9]/g, "");
   return digits.slice(-4) || "card";
+}
+
+/* ── Detect card product from file content / filename ────────────────── */
+
+const CARD_PRODUCT_PATTERNS: [RegExp, CardKey, string][] = [
+  [/FREEDOM\s+UNLIMITED/i, "cfu", "Chase Freedom Unlimited"],
+  [/SAPPHIRE\s+RESERVE/i, "csr", "Chase Sapphire Reserve"],
+  [/SAPPHIRE\s+PREFERRED/i, "csp", "Chase Sapphire Preferred"],
+  [/DELTA.*RESERVE/i, "deltaReserve", "Delta SkyMiles Reserve AMEX"],
+  [/DELTA.*PLATINUM/i, "deltaPlat", "Delta SkyMiles Platinum AMEX"],
+  [/PLATINUM\s+CARD.*AMERICAN\s+EXPRESS/i, "amex", "AMEX Platinum"],
+  [/AMERICAN\s+EXPRESS.*PLATINUM/i, "amex", "AMEX Platinum"],
+  [/AMEX\s+PLATINUM/i, "amex", "AMEX Platinum"],
+  [/GOLD\s+CARD.*AMERICAN\s+EXPRESS/i, "amexGold", "AMEX Gold"],
+  [/AMERICAN\s+EXPRESS.*GOLD/i, "amexGold", "AMEX Gold"],
+  [/AMEX\s+GOLD/i, "amexGold", "AMEX Gold"],
+  [/VENTURE\s*X/i, "venturex", "Capital One Venture X"],
+  [/BILT/i, "bilt", "Bilt Palladium"],
+];
+
+export interface DetectedCard {
+  cardKey: CardKey | null;
+  productName: string | null;
+}
+
+export function detectCardProduct(
+  text: string,
+  filename: string
+): DetectedCard {
+  const combined = filename + "\n" + text.slice(0, 3000);
+  for (const [re, key, name] of CARD_PRODUCT_PATTERNS) {
+    if (re.test(combined)) return { cardKey: key, productName: name };
+  }
+  return { cardKey: null, productName: null };
 }
