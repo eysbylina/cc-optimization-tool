@@ -38,7 +38,7 @@ export default function PieChart({ title, data }: Props) {
   const cy = size / 2;
   const r = size / 2 - 4;
   let startDeg = -90;
-  const paths: JSX.Element[] = [];
+  const paths: React.ReactElement[] = [];
 
   entries.forEach(([, val], i) => {
     const angle = (val / total) * 360;
