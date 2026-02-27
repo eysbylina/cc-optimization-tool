@@ -15,6 +15,7 @@ export default function Home() {
   >(["csr", "bilt", "amex"]);
   const [monthlyRent, setMonthlyRent] = useState(0);
   const [biltCashEnabled, setBiltCashEnabled] = useState(false);
+  const [monthlyBiltEcosystemSpend, setMonthlyBiltEcosystemSpend] = useState(0);
 
   const handleFilesLoaded = useCallback((txns: Transaction[]) => {
     setTransactions((prev) => {
@@ -118,6 +119,8 @@ export default function Home() {
             onMonthlyRentChange={setMonthlyRent}
             biltCashEnabled={biltCashEnabled}
             onBiltCashEnabledChange={setBiltCashEnabled}
+            monthlyBiltEcosystemSpend={monthlyBiltEcosystemSpend}
+            onMonthlyBiltEcosystemSpendChange={setMonthlyBiltEcosystemSpend}
           />
 
           <TransactionTable

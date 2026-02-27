@@ -28,7 +28,9 @@ export type CardKey =
   | "csp"
   | "amex"
   | "amexGold"
-  | "venturex";
+  | "venturex"
+  | "deltaPlat"
+  | "deltaReserve";
 
 export interface CardDefinition {
   name: string;
@@ -44,4 +46,6 @@ export const CARD_KEYS: CardKey[] = [
   "amex",
   "amexGold",
   "venturex",
+  "deltaPlat",
+  "deltaReserve",
 ];

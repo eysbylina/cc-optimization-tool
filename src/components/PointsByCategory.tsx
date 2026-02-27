@@ -10,6 +10,7 @@ interface Props {
   selectedCards: [CardKey, CardKey, CardKey];
   monthlyRent: number;
   biltCashEnabled: boolean;
+  monthlyBiltEcosystemSpend?: number;
   filterLabel?: string;
 }
 
@@ -18,6 +19,7 @@ export default function PointsByCategory({
   selectedCards,
   monthlyRent,
   biltCashEnabled,
+  monthlyBiltEcosystemSpend = 0,
   filterLabel,
 }: Props) {
   const charges = transactions.filter((r) => r.amount < 0);
@@ -33,7 +35,8 @@ export default function PointsByCategory({
   const bc = getBiltCashBreakdown(
     charges.reduce((s, r) => s + Math.abs(r.amount), 0),
     monthlyRent,
-    biltCashEnabled
+    biltCashEnabled,
+    monthlyBiltEcosystemSpend
   );
 
   return (

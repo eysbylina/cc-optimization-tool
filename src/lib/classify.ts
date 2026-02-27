@@ -65,6 +65,15 @@ export function getTxnMultiplier(cardKey: CardKey, txn: Transaction): number {
       )
         return 2;
       return 1;
+    case "deltaPlat":
+      if (cls === "airline") return 3;
+      if (cls === "hotel_direct") return 3;
+      if (cls === "dining") return 2;
+      if (cls === "groceries" || cls === "groceries_online") return 2;
+      return 1;
+    case "deltaReserve":
+      if (cls === "airline") return 3;
+      return 1;
     default:
       return 1;
   }

@@ -11,6 +11,7 @@ interface Props {
   selectedCards: [CardKey, CardKey, CardKey];
   monthlyRent: number;
   biltCashEnabled: boolean;
+  monthlyBiltEcosystemSpend: number;
 }
 
 export default function ExecutiveSummary({
@@ -18,6 +19,7 @@ export default function ExecutiveSummary({
   selectedCards,
   monthlyRent,
   biltCashEnabled,
+  monthlyBiltEcosystemSpend,
 }: Props) {
   const [benefitsVisible, setBenefitsVisible] = useState(false);
   const charges = transactions.filter((r) => r.amount < 0);
@@ -27,7 +29,7 @@ export default function ExecutiveSummary({
     const card = CARDS[key];
     let pts = calcCardPoints(key, charges);
     if (key === "bilt" && biltCashEnabled && monthlyRent > 0) {
-      pts += getBiltCashBreakdown(totalSpend, monthlyRent, true).rentPtsCaptured;
+      pts += getBiltCashBreakdown(totalSpend, monthlyRent, true, monthlyBiltEcosystemSpend).rentPtsCaptured;
     }
     return {
       key,
@@ -39,7 +41,7 @@ export default function ExecutiveSummary({
     };
   });
 
-  const bc = getBiltCashBreakdown(totalSpend, monthlyRent, biltCashEnabled);
+  const bc = getBiltCashBreakdown(totalSpend, monthlyRent, biltCashEnabled, monthlyBiltEcosystemSpend);
   const hasBilt = selectedCards.includes("bilt");
 
   const valOrDash = (key: CardKey, val: number) =>
@@ -47,9 +49,9 @@ export default function ExecutiveSummary({
 
   return (
     <div className="p-4 bg-bg rounded-lg border border-border mb-5">
-      <h3 className="text-base font-semibold mb-1">Executive Summary</h3>
+      <h3 className="text-base font-semibold mb-1">1 Card Summary</h3>
       <p className="text-xs text-muted mb-3">
-        Selected cards above. No points value assumed.
+        Points projection if all spend goes on a single card. No points value assumed.
       </p>
       <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full text-sm border-collapse">
@@ -204,6 +206,21 @@ export default function ExecutiveSummary({
                     </td>
                   ))}
                 </tr>
+                {bc.ecosystemSpendAnnual > 0 && (
+                  <tr>
+                    <td className="p-2 border-b border-border">
+                      Bilt Cash used on ecosystem (Lyft, fitness, etc.)
+                    </td>
+                    {infos.map((c) => (
+                      <td
+                        key={c.key}
+                        className="text-right p-2 border-b border-border"
+                      >
+                        {valOrDash(c.key, bc.ecosystemSpendAnnual)}
+                      </td>
+                    ))}
+                  </tr>
+                )}
                 <tr>
                   <td className="p-2 border-b border-border">
                     Remainder Bilt Cash
@@ -217,6 +234,19 @@ export default function ExecutiveSummary({
                     </td>
                   ))}
                 </tr>
+                {bc.carryoverExcess > 0 && (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="p-2 text-xs border-b border-border"
+                    >
+                      <span className="text-negative font-semibold">
+                        Warning: ${bc.carryoverExcess.toFixed(2)} in Bilt Cash
+                        exceeds the $100/yr carryover limit and will expire.
+                      </span>
+                    </td>
+                  </tr>
+                )}
                 {bc.shortfall > 0 && (
                   <tr>
                     <td
@@ -226,7 +256,7 @@ export default function ExecutiveSummary({
                       <span className="text-negative font-semibold">
                         Shortfall: ${bc.shortfall.toFixed(2)} Bilt Cash. Need $
                         {bc.monthlySpendNeeded.toFixed(0)}/mo card spend to
-                        cover full rent.
+                        cover full rent + ecosystem.
                       </span>
                     </td>
                   </tr>

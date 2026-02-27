@@ -62,4 +62,31 @@ export const CARDS: Record<CardKey, CardDefinition> = {
       "$100 anniversary miles bonus (~10,000 miles)",
     ],
   },
+  deltaPlat: {
+    name: "Delta SkyMiles Platinum AMEX",
+    af: 350,
+    credits: 390,
+    creditDetails: [
+      "$150 Delta Stays hotel credit",
+      "$120 Resy dining credit ($10/mo)",
+      "$120 Rideshare credit ($10/mo)",
+      "Companion Certificate (Main Cabin domestic RT)",
+      "Global Entry / TSA PreCheck fee credit",
+      "First checked bag free on Delta",
+    ],
+  },
+  deltaReserve: {
+    name: "Delta SkyMiles Reserve AMEX",
+    af: 650,
+    credits: 560,
+    creditDetails: [
+      "$200 Delta Stays hotel credit",
+      "$240 Resy dining credit ($20/mo)",
+      "$120 Rideshare credit ($10/mo)",
+      "Companion Certificate (First/Comfort+/Main Cabin domestic RT)",
+      "Delta Sky Club lounge access",
+      "Global Entry / TSA PreCheck fee credit",
+      "First checked bag free on Delta",
+    ],
+  },
 };
