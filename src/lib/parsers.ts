@@ -280,6 +280,11 @@ function parseChaseFallback(records: string[][]): Transaction[] {
 
 /* ── PDF parser (uses pdf.js loaded from CDN) ────────────────────────── */
 
+interface PdfTextItem {
+  str: string;
+  transform?: number[];
+}
+
 declare global {
   interface Window {
     pdfjsLib?: {
@@ -289,7 +294,7 @@ declare global {
           numPages: number;
           getPage: (n: number) => Promise<{
             getTextContent: () => Promise<{
-              items: { str: string }[];
+              items: PdfTextItem[];
             }>;
           }>;
         }>;
@@ -298,6 +303,11 @@ declare global {
   }
 }
 
+/**
+ * Extract text from PDF with proper line detection.
+ * Groups text items by Y-position so each visual line in the PDF
+ * becomes a separate line in the output string.
+ */
 export async function extractPdfText(file: File): Promise<string> {
   const pdfjsLib = window.pdfjsLib;
   if (!pdfjsLib) throw new Error("PDF.js not loaded");
@@ -305,38 +315,176 @@ export async function extractPdfText(file: File): Promise<string> {
     "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-  let fullText = "";
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
+  const allLines: string[] = [];
+
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
     const content = await page.getTextContent();
-    fullText += content.items.map((item) => item.str).join(" ") + "\n";
+
+    // Group text items by Y-position to reconstruct visual lines
+    const lineMap = new Map<number, { x: number; str: string }[]>();
+
+    for (const item of content.items) {
+      if (!item.transform) continue;
+      // Round Y to nearest 2 to group items on the same visual line
+      const y = Math.round(item.transform[5] / 2) * 2;
+      const x = item.transform[4];
+      if (!lineMap.has(y)) lineMap.set(y, []);
+      lineMap.get(y)!.push({ x, str: item.str });
+    }
+
+    // Sort lines top-to-bottom (descending Y in PDF coords), items left-to-right
+    const sortedYs = [...lineMap.keys()].sort((a, b) => b - a);
+    for (const y of sortedYs) {
+      const items = lineMap.get(y)!.sort((a, b) => a.x - b.x);
+      const text = items.map((i) => i.str).join(" ").trim();
+      if (text) allLines.push(text);
+    }
   }
-  return fullText;
+
+  return allLines.join("\n");
 }
 
-const PDF_TXN_RE =
-  /(\d{2}\/\d{2})\s+(\d{2}\/\d{2})\s+(.+?)\s+(-?\$?[\d,]+\.\d{2})\s*$/;
+/* ── PDF transaction patterns (multiple bank formats) ────────────────── */
+
+// Chase: MM/DD  MM/DD  description  amount
+const CHASE_PDF_RE =
+  /^(\d{2}\/\d{2})\s+(\d{2}\/\d{2})\s+(.+?)\s+(-?\$?[\d,]+\.\d{2})$/;
+
+// AMEX year-end: MM/DD/YYYY  MonthName  description  $amount
+const MONTHS_RE =
+  "(?:January|February|March|April|May|June|July|August|September|October|November|December)";
+const AMEX_PDF_RE = new RegExp(
+  `^(\\d{2}\\/\\d{2}\\/\\d{4})\\s+${MONTHS_RE}\\s+(.+?)\\s+-?\\$?([\\d,]+\\.\\d{2})$`
+);
+
+// Generic: MM/DD/YYYY  description  $amount  (or MM/DD/YY)
+const GENERIC_PDF_RE =
+  /^(\d{1,2}\/\d{1,2}\/\d{2,4})\s+(.+?)\s+-?\$?([\d,]+\.\d{2})$/;
+
+// Credit detection: lines whose description suggests a refund/credit
+const CREDIT_DESC_RE =
+  /\bCREDIT\b|\bREFUND\b|\bRETURN(?:ED)?\b|\bCASHBACK\b|\bREWARD\b|\bCB_|\bREBATH?E\b/i;
+
+// Category section headers common in year-end PDF summaries
+const PDF_CATEGORY_MAP: [RegExp, string][] = [
+  [/\bAirline\b/i, "Travel"],
+  [/\bTravel\b/i, "Travel"],
+  [/\bTransportation\b/i, "Travel"],
+  [/\bTaxi/i, "Travel"],
+  [/\bRideshare\b/i, "Travel"],
+  [/\bGrocery|Groceries|Supermarket/i, "Groceries"],
+  [/\bDining\b|\bRestaurant/i, "Food & Drink"],
+  [/\bEntertainment\b/i, "Entertainment"],
+  [/\bCommunication/i, "Entertainment"],
+  [/\bCable\b.*Internet|Internet\b.*Cable/i, "Entertainment"],
+  [/\bStreaming\b/i, "Entertainment"],
+  [/\bMerchandise\b|\bShopping\b/i, "Shopping"],
+  [/\bGas\b|\bFuel\b|\bVehicle\b|\bAutomotive\b/i, "Gas"],
+  [/\bMedical\b|\bHealth\b|\bPharmacy\b/i, "Health & Wellness"],
+  [/\bUtiliti/i, "Bills & Utilities"],
+  [/\bInsurance\b/i, "Bills & Utilities"],
+  [/\bEducation\b/i, "Education"],
+];
+
+function matchPdfCategory(line: string): string | null {
+  for (const [re, cat] of PDF_CATEGORY_MAP) {
+    if (re.test(line)) return cat;
+  }
+  return null;
+}
+
+// Lines to skip (headers, subtotals, metadata)
+const SKIP_LINE_RE =
+  /^(Subtotal|Total|Card Member|Account Number|Date\s+Month|Page\s+\d|Prepared for|Includes charges|Year-End|Account Summary|Combined Spending|Details of Spending|--\s*\d)/i;
 
 export function parsePdfText(text: string): Transaction[] {
+  const lines = text
+    .split(/\n/)
+    .map((l) => l.trim())
+    .filter((l) => l);
   const rows: Transaction[] = [];
-  for (const line of text.split(/\n/)) {
-    const m = line.match(PDF_TXN_RE);
-    if (!m) continue;
-    const amtStr = m[4].replace(/[$,]/g, "");
-    const amount = parseFloat(amtStr) || 0;
-    const txn: Transaction = {
-      transactionDate: m[1],
-      postDate: m[2],
-      description: m[3].trim(),
-      category: "",
-      autoCategory: false,
-      type: amount > 0 ? "Payment" : "Sale",
-      amount: amount > 0 ? amount : -Math.abs(amount),
-      card: "",
-      memo: "",
-    };
-    rows.push(assignCategory(txn));
+  let currentCategory = "";
+
+  for (const line of lines) {
+    if (SKIP_LINE_RE.test(line)) continue;
+
+    // Check if line is a category section header
+    const cat = matchPdfCategory(line);
+    if (cat && !/^\d/.test(line)) {
+      currentCategory = cat;
+      continue;
+    }
+
+    // Try Chase format
+    let m = line.match(CHASE_PDF_RE);
+    if (m) {
+      const amtStr = m[4].replace(/[$,]/g, "");
+      const raw = parseFloat(amtStr) || 0;
+      const isCredit = raw > 0;
+      rows.push(
+        assignCategory({
+          transactionDate: m[1],
+          postDate: m[2],
+          description: m[3].trim(),
+          category: currentCategory,
+          autoCategory: !!currentCategory,
+          type: isCredit ? "Payment/Credit" : "Sale",
+          amount: isCredit ? raw : -Math.abs(raw),
+          card: "",
+          memo: "",
+        })
+      );
+      continue;
+    }
+
+    // Try AMEX year-end format
+    m = line.match(AMEX_PDF_RE);
+    if (m) {
+      const amtStr = m[3].replace(/[$,]/g, "");
+      const raw = parseFloat(amtStr) || 0;
+      const desc = m[2].trim();
+      const isCredit = CREDIT_DESC_RE.test(desc) || line.includes("-$");
+      rows.push(
+        assignCategory({
+          transactionDate: m[1],
+          postDate: "",
+          description: desc,
+          category: currentCategory,
+          autoCategory: !!currentCategory,
+          type: isCredit ? "Payment/Credit" : "Sale",
+          amount: isCredit ? raw : -Math.abs(raw),
+          card: "",
+          memo: "",
+        })
+      );
+      continue;
+    }
+
+    // Try generic date format
+    m = line.match(GENERIC_PDF_RE);
+    if (m) {
+      const amtStr = m[3].replace(/[$,]/g, "");
+      const raw = parseFloat(amtStr) || 0;
+      const desc = m[2].trim();
+      const isCredit = CREDIT_DESC_RE.test(desc) || line.includes("-$");
+      rows.push(
+        assignCategory({
+          transactionDate: m[1],
+          postDate: "",
+          description: desc,
+          category: currentCategory,
+          autoCategory: !!currentCategory,
+          type: isCredit ? "Payment/Credit" : "Sale",
+          amount: isCredit ? raw : -Math.abs(raw),
+          card: "",
+          memo: "",
+        })
+      );
+      continue;
+    }
   }
+
   return rows;
 }
 
